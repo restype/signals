@@ -1,6 +1,6 @@
 {
   "private": true,
-  "name": "signals",
+  "name": "signalstate",
   "version": "0.1.0",
   "description": "",
   "workspaces": [
