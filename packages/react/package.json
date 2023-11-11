@@ -1,0 +1,12 @@
+{
+  "name": "@signals/react",
+  "version": "0.1.0",
+  "main": "./src/index.ts",
+  "devDependencies": {
+    "@types/react": "^18.2.0"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0",
+    "typescript": "^5.0.0"
+  }
+}
