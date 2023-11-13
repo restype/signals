@@ -3,38 +3,54 @@ import { useSyncExternalStore } from "react";
 let tracking: ((fn: () => void) => () => void)[] | undefined;
 let batching: (() => void)[] | undefined;
 
-export function createSignal<T>(initialValue: T) {
+type Signal<T> = {
+  signal: () => {
+    value: T;
+    setValue: (newValue: T) => void;
+  };
+  useSignal: () => readonly [T, (newValue: T) => void];
+};
+
+type Computed<T> = {
+  computed: () => {
+    value: T;
+  };
+  useComputed: () => T;
+};
+
+export function createSignal<T>(initialValue: T): Signal<T> {
   const sig = signal(initialValue);
 
-  const setSigValue = (newValue: T) => {
-    sig.value = newValue;
-  };
-
-  const subscribe = sig.subscribe;
-  const getSnapshot = () => sig.value;
-
   const useSignal = () => {
-    const value = useSyncExternalStore(subscribe, getSnapshot);
-    return [value, setSigValue] as const;
+    const value = useSyncExternalStore(sig.subscribe, sig.getValue);
+    return [value, sig.setValue] as const;
   };
 
-  return { signal: () => [sig.value, setSigValue] as const, useSignal };
+  return {
+    signal: () => ({
+      value: sig.getValue(),
+      setValue: sig.setValue,
+    }),
+    useSignal,
+  };
 }
 
-export function createComputed<T>(fn: () => T) {
+export function createComputed<T>(fn: () => T): Computed<T> {
   const sig = computed(fn);
 
-  const subscribe = sig.subscribe;
-  const getSnapshot = () => sig.value;
-
   const useComputed = () => {
-    return useSyncExternalStore(subscribe, getSnapshot);
+    return useSyncExternalStore(sig.subscribe, sig.getValue);
   };
 
-  return { computed: () => sig.value, useComputed };
+  return {
+    computed: () => ({
+      value: sig.getValue(),
+    }),
+    useComputed,
+  };
 }
 
-export function createEffect<T>(fn: () => T) {
+export function createEffect<T>(fn: () => T): void {
   tracking = [];
 
   fn();
@@ -48,7 +64,7 @@ export function createEffect<T>(fn: () => T) {
   tracking = undefined;
 }
 
-export function batch<T>(fn: () => T) {
+export function batch<T>(fn: () => T): void {
   batching = [];
 
   fn();
@@ -60,7 +76,7 @@ export function batch<T>(fn: () => T) {
   batching = undefined;
 }
 
-export function untracked<T>(fn: () => T) {
+export function untracked<T>(fn: () => T): void {
   batching = [];
 
   fn();
@@ -69,72 +85,57 @@ export function untracked<T>(fn: () => T) {
 }
 
 function signal<T>(initialValue: T) {
-  let listeners: (() => void)[] = [];
+  const listeners: Set<() => void> = new Set();
 
   const subscribe = (fn: () => void) => {
-    listeners = [...listeners, fn];
+    listeners.add(fn);
 
     return () => {
-      listeners = listeners.filter((it) => it !== fn);
+      listeners.delete(fn);
     };
   };
 
-  return new Proxy(
-    { value: initialValue, subscribe },
-    {
-      get(target, key: "value" | "subscribe") {
-        tracking?.push(subscribe);
-        return target[key];
-      },
-      set(target, key, value) {
-        if (key !== "value") {
-          return false;
-        }
+  let value = initialValue;
 
-        target.value = value;
+  return {
+    subscribe,
+    getValue: () => {
+      tracking?.push(subscribe);
+      return value;
+    },
+    setValue: (newValue: T) => {
+      value = newValue;
 
-        if (batching) {
-          batching.push(...listeners);
-          return true;
-        }
-
-        for (const listener of listeners) {
-          listener();
-        }
-
+      if (batching) {
+        batching.push(...listeners);
         return true;
-      },
-    }
-  );
+      }
+
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+  };
 }
 
 function computed<T>(fn: () => T) {
-  let listeners: (() => void)[] = [];
+  const listeners: Set<() => void> = new Set();
 
   const subscribe = (fn: () => void) => {
-    listeners = [...listeners, fn];
+    listeners.add(fn);
 
     return () => {
-      listeners = listeners.filter((it) => it !== fn);
+      listeners.delete(fn);
     };
   };
 
   tracking = [];
 
-  const value = fn();
-
-  const proxy = new Proxy(
-    { value, subscribe },
-    {
-      get(target, key: "value" | "subscribe") {
-        return target[key];
-      },
-    }
-  );
+  let value = fn();
 
   for (const track of tracking) {
     track(() => {
-      proxy.value = fn();
+      value = fn();
 
       for (const listener of listeners) {
         listener();
@@ -144,5 +145,8 @@ function computed<T>(fn: () => T) {
 
   tracking = undefined;
 
-  return proxy;
+  return {
+    subscribe,
+    getValue: () => value,
+  };
 }
