@@ -1,63 +1,164 @@
 import { useSyncExternalStore } from "react";
-import { produce } from "immer";
 
-let tracking: ((fn: () => void) => () => void)[] | undefined;
-let batching: (() => void)[] | undefined;
+let tracking: Set<(fn: () => void) => () => void> | undefined;
+let batching: Set<() => void> | undefined;
 
 type Signal<T> = {
-  signal: () => {
-    value: T;
-    setValue: (newValue: T | ((draft: T) => void)) => void;
-  };
-  useSignal: () => readonly [T, (newValue: T) => void];
+  value: T;
+  useSignal: () => readonly [T, (newValue: T | ((newValue: T) => T)) => void];
 };
 
 type Computed<T> = {
-  computed: () => {
-    value: T;
-  };
+  value: T;
   useComputed: () => T;
 };
 
-export function createSignal<T>(initialValue: T): Signal<T> {
-  const sig = signal(initialValue);
+export function signal<T>(initialValue: T): Signal<T> {
+  const listeners: Set<() => void> = new Set();
 
-  const useSignal = () => {
-    const value = useSyncExternalStore(sig.subscribe, sig.getValue);
-    return [value, sig.setValue] as const;
+  const subscribe = (fn: () => void) => {
+    listeners.add(fn);
+
+    return () => {
+      listeners.delete(fn);
+    };
   };
 
-  return {
-    signal: () => ({
-      value: sig.getValue(),
-      setValue: sig.setValue,
-    }),
-    useSignal,
-  };
+  const proxy = new Proxy(
+    { value: initialValue, useSignal },
+    {
+      get(target, key: "value" | "useSignal") {
+        if (key === "value") {
+          tracking?.add(subscribe);
+          return target.value;
+        }
+
+        if (key === "useSignal") {
+          return target.useSignal;
+        }
+      },
+      set(target, key, value) {
+        if (key !== "value") {
+          return false;
+        }
+
+        target.value = value;
+
+        if (batching) {
+          for (const listener of listeners) {
+            batching.add(listener);
+          }
+
+          return true;
+        }
+
+        for (const listener of listeners) {
+          listener();
+        }
+
+        return true;
+      },
+    }
+  );
+
+  function useSignal() {
+    const value = useSyncExternalStore(subscribe, () => proxy.value);
+    return [
+      value,
+      (newValue: T | ((currentValue: T) => T)) => {
+        proxy.value =
+          newValue instanceof Function ? newValue(proxy.value) : newValue;
+      },
+    ] as const;
+  }
+
+  return proxy;
 }
 
-export function createComputed<T>(fn: () => T): Computed<T> {
-  const sig = computed(fn);
+export function computed<T>(fn: () => T): Computed<T> {
+  const listeners: Set<() => void> = new Set();
 
-  const useComputed = () => {
-    return useSyncExternalStore(sig.subscribe, sig.getValue);
+  const subscribe = (fn: () => void) => {
+    listeners.add(fn);
+
+    return () => {
+      listeners.delete(fn);
+    };
   };
 
-  return {
-    computed: () => ({
-      value: sig.getValue(),
-    }),
-    useComputed,
-  };
-}
+  tracking = new Set();
 
-export function createEffect<T>(fn: () => T): void {
-  tracking = [];
+  let value = fn();
 
-  fn();
+  let batchedCount = 0;
+  const targetBacthedCount = tracking.size - 1;
 
   for (const track of tracking) {
     track(() => {
+      if (batching) {
+        if (batchedCount === targetBacthedCount) {
+          batchedCount = 0;
+        } else {
+          batchedCount += 1;
+          return;
+        }
+      }
+
+      value = fn();
+
+      for (const listener of listeners) {
+        listener();
+      }
+    });
+  }
+
+  tracking = undefined;
+
+  const proxy = new Proxy(
+    { value, useComputed },
+    {
+      get(target, key: "value" | "useComputed") {
+        if (key === "value") {
+          tracking?.add(subscribe);
+          return value;
+        }
+
+        if (key === "useComputed") {
+          return target.useComputed;
+        }
+      },
+      set() {
+        return false;
+      },
+    }
+  );
+
+  function useComputed() {
+    return useSyncExternalStore(subscribe, () => proxy.value);
+  }
+
+  return proxy;
+}
+
+export function effect<T>(fn: () => T): void {
+  tracking = new Set();
+
+  fn();
+
+  let currentBatchedCount = 0;
+  const targetBacthedCount = tracking.size - 1;
+
+  for (const track of tracking) {
+    track(() => {
+      if (batching) {
+        if (currentBatchedCount === targetBacthedCount) {
+          currentBatchedCount = 0;
+        } else {
+          currentBatchedCount += 1;
+          return;
+        }
+      }
+
       fn();
     });
   }
@@ -66,7 +167,7 @@ export function createEffect<T>(fn: () => T): void {
 }
 
 export function batch<T>(fn: () => T): void {
-  batching = [];
+  batching = new Set();
 
   fn();
 
@@ -78,77 +179,9 @@ export function batch<T>(fn: () => T): void {
 }
 
 export function untracked<T>(fn: () => T): void {
-  batching = [];
+  batching = new Set();
 
   fn();
 
   batching = undefined;
-}
-
-function signal<T>(initialValue: T) {
-  const listeners: Set<() => void> = new Set();
-
-  const subscribe = (fn: () => void) => {
-    listeners.add(fn);
-
-    return () => {
-      listeners.delete(fn);
-    };
-  };
-
-  let value = initialValue;
-
-  return {
-    subscribe,
-    getValue: () => {
-      tracking?.push(subscribe);
-      return value;
-    },
-    setValue: (newValue: T | ((draft: T) => void)) => {
-      value =
-        newValue instanceof Function ? produce(value, newValue) : newValue;
-
-      if (batching) {
-        batching.push(...listeners);
-        return;
-      }
-
-      for (const listener of listeners) {
-        listener();
-      }
-    },
-  };
-}
-
-function computed<T>(fn: () => T) {
-  const listeners: Set<() => void> = new Set();
-
-  const subscribe = (fn: () => void) => {
-    listeners.add(fn);
-
-    return () => {
-      listeners.delete(fn);
-    };
-  };
-
-  tracking = [];
-
-  let value = fn();
-
-  for (const track of tracking) {
-    track(() => {
-      value = fn();
-
-      for (const listener of listeners) {
-        listener();
-      }
-    });
-  }
-
-  tracking = undefined;
-
-  return {
-    subscribe,
-    getValue: () => value,
-  };
 }
