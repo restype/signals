@@ -6,7 +6,7 @@ let batching: (() => void)[] | undefined;
 type Signal<T> = {
   signal: () => {
     value: T;
-    setValue: (newValue: T) => void;
+    setValue: (newValue: T | ((currentValue: T) => T)) => void;
   };
   useSignal: () => readonly [T, (newValue: T) => void];
 };
