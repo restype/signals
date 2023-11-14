@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { produce } from "immer";
 
 let tracking: ((fn: () => void) => () => void)[] | undefined;
 let batching: (() => void)[] | undefined;
@@ -6,7 +7,7 @@ let batching: (() => void)[] | undefined;
 type Signal<T> = {
   signal: () => {
     value: T;
-    setValue: (newValue: T | ((currentValue: T) => T)) => void;
+    setValue: (newValue: T | ((draft: T) => void)) => void;
   };
   useSignal: () => readonly [T, (newValue: T) => void];
 };
@@ -103,8 +104,9 @@ function signal<T>(initialValue: T) {
       tracking?.push(subscribe);
       return value;
     },
-    setValue: (newValue: T | ((currentValue: T) => T)) => {
-      value = newValue instanceof Function ? newValue(value) : newValue;
+    setValue: (newValue: T | ((draft: T) => void)) => {
+      value =
+        newValue instanceof Function ? produce(value, newValue) : newValue;
 
       if (batching) {
         batching.push(...listeners);
