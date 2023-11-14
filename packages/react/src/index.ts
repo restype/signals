@@ -103,12 +103,12 @@ function signal<T>(initialValue: T) {
       tracking?.push(subscribe);
       return value;
     },
-    setValue: (newValue: T) => {
-      value = newValue;
+    setValue: (newValue: T | ((currentValue: T) => T)) => {
+      value = newValue instanceof Function ? newValue(value) : newValue;
 
       if (batching) {
         batching.push(...listeners);
-        return true;
+        return;
       }
 
       for (const listener of listeners) {
