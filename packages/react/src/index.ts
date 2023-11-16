@@ -5,7 +5,10 @@ let batching: Set<() => void> | undefined;
 
 type Signal<T> = {
   value: T;
-  useSignal: () => readonly [T, (newValue: T | ((newValue: T) => T)) => void];
+  useSignal: () => readonly [
+    T,
+    (newValue: T | ((currentValue: T) => T)) => void
+  ];
 };
 
 type Computed<T> = {
