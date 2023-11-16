@@ -27,59 +27,42 @@ export function signal<T>(initialValue: T): Signal<T> {
     };
   };
 
-  const proxy = new Proxy(
-    { value: initialValue, useSignal },
-    {
-      get(target, key: "value" | "useSignal") {
-        if (key === "value") {
-          tracking?.add(subscribe);
-          return target.value;
-        }
+  let value = initialValue;
 
-        if (key === "useSignal") {
-          return target.useSignal;
-        }
-      },
-      set(target, key, value) {
-        if (key !== "value") {
-          return false;
-        }
+  return {
+    get value() {
+      tracking?.add(subscribe);
+      return value;
+    },
+    set value(newValue: T) {
+      value = newValue;
 
-        target.value = value;
-
-        if (batching) {
-          for (const listener of listeners) {
-            batching.add(listener);
-          }
-
-          return true;
-        }
-
+      if (batching) {
         for (const listener of listeners) {
-          listener();
+          batching.add(listener);
         }
 
-        return true;
-      },
-    }
-  );
+        return;
+      }
 
-  function useSignal() {
-    const value = useSyncExternalStore(
-      subscribe,
-      () => proxy.value,
-      () => proxy.value
-    );
-    return [
-      value,
-      (newValue: T | ((currentValue: T) => T)) => {
-        proxy.value =
-          newValue instanceof Function ? newValue(proxy.value) : newValue;
-      },
-    ] as const;
-  }
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+    useSignal() {
+      const reactValue = useSyncExternalStore(
+        subscribe,
+        () => value,
+        () => value
+      );
 
-  return proxy;
+      const setValue = (newValue: T | ((currentValue: T) => T)) => {
+        this.value = newValue instanceof Function ? newValue(value) : newValue;
+      };
+
+      return [reactValue, setValue] as const;
+    },
+  };
 }
 
 export function computed<T>(fn: () => T): Computed<T> {
@@ -121,34 +104,19 @@ export function computed<T>(fn: () => T): Computed<T> {
 
   tracking = undefined;
 
-  const proxy = new Proxy(
-    { value, useComputed },
-    {
-      get(target, key: "value" | "useComputed") {
-        if (key === "value") {
-          tracking?.add(subscribe);
-          return value;
-        }
-
-        if (key === "useComputed") {
-          return target.useComputed;
-        }
-      },
-      set() {
-        return false;
-      },
-    }
-  );
-
-  function useComputed() {
-    return useSyncExternalStore(
-      subscribe,
-      () => proxy.value,
-      () => proxy.value
-    );
-  }
-
-  return proxy;
+  return {
+    get value() {
+      tracking?.add(subscribe);
+      return value;
+    },
+    useComputed() {
+      return useSyncExternalStore(
+        subscribe,
+        () => value,
+        () => value
+      );
+    },
+  };
 }
 
 export function effect<T>(fn: () => T): void {
