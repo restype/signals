@@ -65,7 +65,11 @@ export function signal<T>(initialValue: T): Signal<T> {
   );
 
   function useSignal() {
-    const value = useSyncExternalStore(subscribe, () => proxy.value);
+    const value = useSyncExternalStore(
+      subscribe,
+      () => proxy.value,
+      () => proxy.value
+    );
     return [
       value,
       (newValue: T | ((currentValue: T) => T)) => {
@@ -137,7 +141,11 @@ export function computed<T>(fn: () => T): Computed<T> {
   );
 
   function useComputed() {
-    return useSyncExternalStore(subscribe, () => proxy.value);
+    return useSyncExternalStore(
+      subscribe,
+      () => proxy.value,
+      () => proxy.value
+    );
   }
 
   return proxy;
