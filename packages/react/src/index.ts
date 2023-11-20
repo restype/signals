@@ -29,7 +29,7 @@ export function signal<T>(initialValue: T): Signal<T> {
 
   let value = initialValue;
 
-  return {
+  const sig: Signal<T> = {
     get value() {
       tracking?.add(subscribe);
       return value;
@@ -49,20 +49,26 @@ export function signal<T>(initialValue: T): Signal<T> {
         listener();
       }
     },
-    useSignal() {
-      const reactValue = useSyncExternalStore(
-        subscribe,
-        () => value,
-        () => value
-      );
-
-      const setValue = (newValue: T | ((currentValue: T) => T)) => {
-        this.value = newValue instanceof Function ? newValue(value) : newValue;
-      };
-
-      return [reactValue, setValue] as const;
-    },
+    useSignal,
   };
+
+  const getSnapshot = () => value;
+
+  const setValue = (newValue: T | ((currentValue: T) => T)) => {
+    sig.value = newValue instanceof Function ? newValue(value) : newValue;
+  };
+
+  function useSignal() {
+    const reactValue = useSyncExternalStore(
+      subscribe,
+      getSnapshot,
+      getSnapshot
+    );
+
+    return [reactValue, setValue] as const;
+  }
+
+  return sig;
 }
 
 export function computed<T>(fn: () => T): Computed<T> {
@@ -104,17 +110,15 @@ export function computed<T>(fn: () => T): Computed<T> {
 
   tracking = undefined;
 
+  const getSnapshot = () => value;
+
   return {
     get value() {
       tracking?.add(subscribe);
       return value;
     },
     useComputed() {
-      return useSyncExternalStore(
-        subscribe,
-        () => value,
-        () => value
-      );
+      return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
     },
   };
 }
